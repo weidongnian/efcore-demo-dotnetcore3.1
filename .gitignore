@@ -1,0 +1,5 @@
+#git remote add origin https://github.com/weidongnian/efcore-demo-dotnetcore3.1.git
+
+ContosoUniversity/bin/
+ContosoUniversity/obj/Debug/
+*.db
