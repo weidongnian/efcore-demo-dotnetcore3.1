@@ -1,6 +1,6 @@
 在mac下使用vscode，基于dotnetcore3.1 webapp创建的项目,数据层使用efcore+sqlite
 
-0 安装 dotnet sdk 3.0
+0 安装 dotnet sdk 3.1
 
 1，安装efcore cli
 
@@ -319,3 +319,416 @@ Index.cshtml 和 Index.cshtml.cs
     {
         Students = await _context.Students.ToListAsync();
     }
+
+19，完善注册功能 Pages/Students/Details.cshtml.cs
+    
+    //Student = await _context.Students.FirstOrDefaultAsync(m => m.ID == id);
+    //Include 和 ThenInclude 方法使上下文加载 Student.Enrollments 导航属性，
+    //并在每个注册中加载 Enrollment.Course 导航属性。
+
+    Student = await _context.Students
+    .Include (s => s.Enrollments)
+    .ThenInclude (e => e.Course)
+    .AsNoTracking ()//AsNoTracking 方法将会提升性能
+    .FirstOrDefaultAsync (m => m.ID == id);
+
+20，修改Pages/Students/Details.cshtml页
+
+        <dt class="col-sm-2">
+            @Html.DisplayNameFor(model => model.Student.Enrollments)
+        </dt>
+        <dd class="col-sm-10">
+            <table class="table">
+                <tr>
+                    <th>Course Title</th>
+                    <th>Grade</th>
+                </tr>
+                @foreach (var item in Model.Student.Enrollments)
+                {
+                    <tr>
+                        <td>
+                            @Html.DisplayFor(modelItem => item.Course.Title)
+                        </td>
+                        <td>
+                            @Html.DisplayFor(modelItem => item.Grade)
+                        </td>
+                    </tr>
+                }
+            </table>
+        </dd>
+
+21，更新“创建”页 并 dotnet run
+
+    var emptyStudent = new Student();
+
+    if (await TryUpdateModelAsync<Student>(
+        emptyStudent,
+        "student",   // Prefix for form value.
+        s => s.FirstMidName, s => s.LastName, s => s.EnrollmentDate))
+    {
+        _context.Students.Add(emptyStudent);
+        await _context.SaveChangesAsync();
+        return RedirectToPage("./Index");
+    }
+
+22，创建 Student 视图模型
+
+    public class StudentVM
+    {
+        public int ID { get; set; }
+        public string LastName { get; set; }
+        public string FirstMidName { get; set; }
+        public DateTime EnrollmentDate { get; set; }
+    }
+
+23，修改Student/Create.cshtml.cs
+
+    [BindProperty]
+    public StudentVM StudentVM { get; set; }
+
+    public async Task<IActionResult> OnPostAsync()
+    {
+        if (!ModelState.IsValid)
+        {
+            return Page();
+        }
+
+        var entry = _context.Add(new Student());
+        entry.CurrentValues.SetValues(StudentVM);
+        await _context.SaveChangesAsync();
+        return RedirectToPage("./Index");
+    }
+
+24，更新Pages/Students/Edit.cshtml.cs页
+
+    public async Task<IActionResult> OnGetAsync(int? id)
+    {
+        if (id == null)
+        {
+            return NotFound();
+        }
+
+        Student = await _context.Students.FindAsync(id);
+
+        if (Student == null)
+        {
+            return NotFound();
+        }
+        return Page();
+    }
+
+    public async Task<IActionResult> OnPostAsync(int id)
+    {
+        var studentToUpdate = await _context.Students.FindAsync(id);
+
+        if (studentToUpdate == null)
+        {
+            return NotFound();
+        }
+
+        if (await TryUpdateModelAsync<Student>(
+            studentToUpdate,
+            "student",
+            s => s.FirstMidName, s => s.LastName, s => s.EnrollmentDate))
+        {
+            await _context.SaveChangesAsync();
+            return RedirectToPage("./Index");
+        }
+
+        return Page();
+    }
+
+25，更新“删除”页 Pages/Students/Delete.cshtml.cs 
+
+    using ContosoUniversity.Models;
+    using Microsoft.AspNetCore.Mvc;
+    using Microsoft.AspNetCore.Mvc.RazorPages;
+    using Microsoft.EntityFrameworkCore;
+    using System.Threading.Tasks;
+
+    namespace ContosoUniversity.Pages.Students
+    {
+        public class DeleteModel : PageModel
+        {
+            private readonly ContosoUniversity.Data.SchoolContext _context;
+
+            public DeleteModel(ContosoUniversity.Data.SchoolContext context)
+            {
+                _context = context;
+            }
+
+            [BindProperty]
+            public Student Student { get; set; }
+            public string ErrorMessage { get; set; }
+
+            public async Task<IActionResult> OnGetAsync(int? id, bool? saveChangesError = false)
+            {
+                if (id == null)
+                {
+                    return NotFound();
+                }
+
+                Student = await _context.Students
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(m => m.ID == id);
+
+                if (Student == null)
+                {
+                    return NotFound();
+                }
+
+                if (saveChangesError.GetValueOrDefault())
+                {
+                    ErrorMessage = "Delete failed. Try again";
+                }
+
+                return Page();
+            }
+
+            public async Task<IActionResult> OnPostAsync(int? id)
+            {
+                if (id == null)
+                {
+                    return NotFound();
+                }
+
+                var student = await _context.Students.FindAsync(id);
+
+                if (student == null)
+                {
+                    return NotFound();
+                }
+
+                try
+                {
+                    _context.Students.Remove(student);
+                    await _context.SaveChangesAsync();
+                    return RedirectToPage("./Index");
+                }
+                catch (DbUpdateException /* ex */)
+                {
+                    //Log the error (uncomment ex variable name and write a log.)
+                    return RedirectToAction("./Delete",
+                                        new { id, saveChangesError = true });
+                }
+            }
+        }
+    }
+
+26，向“删除”Razor 页面添加错误消息 (Pages/Students/Delete.cshtml) 
+
+<p class="text-danger">@Model.ErrorMessage</p>
+
+27，添加排序 Pages/Students/Index.cshtml.cs
+
+        public string NameSort { get; set; }
+        public string DateSort { get; set; }
+        public string CurrentFilter { get; set; }
+        public string CurrentSort { get; set; }
+
+        public IList<Student> Students { get; set; }
+
+        public async Task OnGetAsync(string sortOrder)
+        {
+            NameSort = String.IsNullOrEmpty(sortOrder) ? "name_desc" : "";
+            DateSort = sortOrder == "Date" ? "date_desc" : "Date";
+
+            IQueryable<Student> studentsIQ = from s in _context.Students
+                                            select s;
+
+            switch (sortOrder)
+            {
+                case "name_desc":
+                    studentsIQ = studentsIQ.OrderByDescending(s => s.LastName);
+                    break;
+                case "Date":
+                    studentsIQ = studentsIQ.OrderBy(s => s.EnrollmentDate);
+                    break;
+                case "date_desc":
+                    studentsIQ = studentsIQ.OrderByDescending(s => s.EnrollmentDate);
+                    break;
+                default:
+                    studentsIQ = studentsIQ.OrderBy(s => s.LastName);
+                    break;
+            }
+
+            Students = await studentsIQ.AsNoTracking().ToListAsync();
+        }
+
+28，向“学生索引”页添加列标题超链接，使用以下代码替换 Students/Index.cshtml 中的代码。
+
+    @page
+    @model ContosoUniversity.Pages.Students.IndexModel
+
+    @{
+        ViewData["Title"] = "Students";
+    }
+
+    <h2>Students</h2>
+    <p>
+        <a asp-page="Create">Create New</a>
+    </p>
+
+    <table class="table">
+        <thead>
+            <tr>
+                <th>
+                    <a asp-page="./Index" asp-route-sortOrder="@Model.NameSort">
+                        @Html.DisplayNameFor(model => model.Students[0].LastName)
+                    </a>
+                </th>
+                <th>
+                    @Html.DisplayNameFor(model => model.Students[0].FirstMidName)
+                </th>
+                <th>
+                    <a asp-page="./Index" asp-route-sortOrder="@Model.DateSort">
+                        @Html.DisplayNameFor(model => model.Students[0].EnrollmentDate)
+                    </a>
+                </th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var item in Model.Students)
+            {
+                <tr>
+                    <td>
+                        @Html.DisplayFor(modelItem => item.LastName)
+                    </td>
+                    <td>
+                        @Html.DisplayFor(modelItem => item.FirstMidName)
+                    </td>
+                    <td>
+                        @Html.DisplayFor(modelItem => item.EnrollmentDate)
+                    </td>
+                    <td>
+                        <a asp-page="./Edit" asp-route-id="@item.ID">Edit</a> |
+                        <a asp-page="./Details" asp-route-id="@item.ID">Details</a> |
+                        <a asp-page="./Delete" asp-route-id="@item.ID">Delete</a>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+29，使用以下代码替换 Students/Index.cshtml.cs 中的代码，以添加筛选
+
+    using ContosoUniversity.Data;
+    using ContosoUniversity.Models;
+    using Microsoft.AspNetCore.Mvc.RazorPages;
+    using Microsoft.EntityFrameworkCore;
+    using System;
+    using System.Collections.Generic;
+    using System.Linq;
+    using System.Threading.Tasks;
+
+    namespace ContosoUniversity.Pages.Students
+    {
+        public class IndexModel : PageModel
+        {
+            private readonly SchoolContext _context;
+
+            public IndexModel(SchoolContext context)
+            {
+                _context = context;
+            }
+
+            public string NameSort { get; set; }
+            public string DateSort { get; set; }
+            public string CurrentFilter { get; set; }
+            public string CurrentSort { get; set; }
+
+            public IList<Student> Students { get; set; }
+
+            public async Task OnGetAsync(string sortOrder, string searchString)
+            {
+                NameSort = String.IsNullOrEmpty(sortOrder) ? "name_desc" : "";
+                DateSort = sortOrder == "Date" ? "date_desc" : "Date";
+
+                CurrentFilter = searchString;
+                
+                IQueryable<Student> studentsIQ = from s in _context.Students
+                                                select s;
+                if (!String.IsNullOrEmpty(searchString))
+                {
+                    studentsIQ = studentsIQ.Where(s => s.LastName.Contains(searchString)
+                                        || s.FirstMidName.Contains(searchString));
+                }
+
+                switch (sortOrder)
+                {
+                    case "name_desc":
+                        studentsIQ = studentsIQ.OrderByDescending(s => s.LastName);
+                        break;
+                    case "Date":
+                        studentsIQ = studentsIQ.OrderBy(s => s.EnrollmentDate);
+                        break;
+                    case "date_desc":
+                        studentsIQ = studentsIQ.OrderByDescending(s => s.EnrollmentDate);
+                        break;
+                    default:
+                        studentsIQ = studentsIQ.OrderBy(s => s.LastName);
+                        break;
+                }
+
+                Students = await studentsIQ.AsNoTracking().ToListAsync();
+            }
+        }
+    }
+
+30，更新 Razor 页面，替换 Pages/Students/Index.cshtml 中的代码，以创建“搜索”按钮和各种 chrome
+
+31，添加分页本部分将创建一个 PaginatedList 类来支持分页。 PaginatedList 类使用 Skip 和 Take 语句在服务器上筛选数据，而不是检索所有表格行
+
+32，创建 PaginatedList 类
+
+    using System;
+    using System.Collections.Generic;
+    using System.Linq;
+    using System.Threading.Tasks;
+    using Microsoft.EntityFrameworkCore;
+
+    namespace ContosoUniversity
+    {
+        public class PaginatedList<T> : List<T>
+        {
+            public int PageIndex { get; private set; }
+            public int TotalPages { get; private set; }
+
+            public PaginatedList(List<T> items, int count, int pageIndex, int pageSize)
+            {
+                PageIndex = pageIndex;
+                TotalPages = (int)Math.Ceiling(count / (double)pageSize);
+
+                this.AddRange(items);
+            }
+
+            public bool HasPreviousPage
+            {
+                get
+                {
+                    return (PageIndex > 1);
+                }
+            }
+
+            public bool HasNextPage
+            {
+                get
+                {
+                    return (PageIndex < TotalPages);
+                }
+            }
+
+            public static async Task<PaginatedList<T>> CreateAsync(
+                IQueryable<T> source, int pageIndex, int pageSize)
+            {
+                var count = await source.CountAsync();
+                var items = await source.Skip(
+                    (pageIndex - 1) * pageSize)
+                    .Take(pageSize).ToListAsync();
+                return new PaginatedList<T>(items, count, pageIndex, pageSize);
+            }
+        }
+    }
+
+32，
