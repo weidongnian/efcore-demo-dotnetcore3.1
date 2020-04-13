@@ -1,17 +1,44 @@
-   using System.Collections.Generic;
-   using System;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
-   namespace ContosoUniversity.Models {
-       public class Student {
-           public int ID { get; set; }
-           public string LastName { get; set; }
-           public string FirstMidName { get; set; }
-           public DateTime EnrollmentDate { get; set; }
+namespace ContosoUniversity.Models
+{
+    public class Student
+    {
+        public int ID { get; set; }
+        [Required]
+        [StringLength(50)]
+        [Display(Name = "Last Name")]
+        public string LastName { get; set; }
+        [Required]
+        [StringLength(50, ErrorMessage = "First name cannot be longer than 50 characters.")]
+        [Column("FirstName")]
+        [Display(Name = "First Name")]
+        public string FirstMidName { get; set; }
+        [DataType(DataType.Date)]
+        [DisplayFormat(DataFormatString = "{0:yyyy-MM-dd}", ApplyFormatInEditMode = true)]
+        [Display(Name = "Enrollment Date")]
+        public DateTime EnrollmentDate { get; set; }
 
-           /// <summary>
-           /// 导航属性，外键表，一对多
-           /// </summary>
-           /// <value></value>
-           public ICollection<Enrollment> Enrollments { get; set; }
-       }
-   }
+        /// <summary>
+        /// 计算属性
+        /// </summary>
+        /// <value></value>
+        [Display(Name = "Full Name")]
+        public string FullName
+        {
+            get
+            {
+                return LastName + ", " + FirstMidName;
+            }
+        }
+
+        /// <summary>
+        /// 导航属性，一个人可以注册多个课程
+        /// </summary>
+        /// <value></value>
+        public ICollection<Enrollment> Enrollments { get; set; }
+    }
+}

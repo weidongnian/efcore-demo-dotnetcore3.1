@@ -731,4 +731,147 @@ Index.cshtml 和 Index.cshtml.cs
         }
     }
 
-32，
+32，删除数据库,操作之前先按dotnet-ef工具，dotnet tool install --global dotnet-ef 
+
+    dotnet ef database drop --force
+
+32，创建初始数据迁移
+
+    dotnet ef migrations add IniticalCreate
+
+    dotnet ef database update
+
+    但在window的 visual studio 下请如下执行:
+
+    Add-Migrations IniticalCreate
+
+    Update-Database
+
+33，新增更多实体，通过指定格式设置、验证和数据库映射规则来自定义数据模型
+
+    ![Image 新增更多实体](https://docs.microsoft.com/zh-cn/aspnet/core/data/ef-rp/complex-data-model/_static/diagram.png?view=aspnetcore-3.1)
+
+34，ef core 会针对不可为空的FK和多对多关系，启用级联删除,某一情况下要禁用级联删除
+
+    modelBuilder.Entity<Department>()
+    .HasOne(d => d.Administrator)
+    .WithMany()
+    .OnDelete(DeleteBehavior.Restrict)
+
+35，多对多关系,一个学生会有多个注册课程信息
+
+    ![Image 学生会与课程的关联](https://docs.microsoft.com/zh-cn/aspnet/core/data/ef-rp/complex-data-model/_static/student-course.png?view=aspnetcore-3.1)
+
+    ![Image 实体关系图](https://docs.microsoft.com/zh-cn/aspnet/core/data/ef-rp/complex-data-model/_static/diagram.png?view=aspnetcore-3.1)
+
+36，EF Core 可采用多种方式将相关数据加载到实体的导航属性中：预先加载、显式加载和延迟加载
+
+    https://docs.microsoft.com/zh-cn/aspnet/core/data/ef-rp/read-related-data?view=aspnetcore-3.1&tabs=visual-studio
+
+37，搭建“课程”页的基架
+
+    dotnet aspnet-codegenerator razorpage -m Course -dc SchoolContext -udl -outDir Pages/Courses --referenceScriptLibraries
+
+38，悲观并发和开放式并发(存储优先方案，sql server中表有一个数据类型rowversion)
+
+        /// <summary>
+        /// 并发字段
+        /// </summary>
+        /// <value></value>
+        [Timestamp]
+        public byte[] RowVersion { get; set; }
+
+40，保存学院方法,并检查是否并发冲突
+
+        public async Task<IActionResult> OnPostAsync(int id)
+        {
+            if (!ModelState.IsValid)
+            {
+                return Page();
+            }
+
+            var departmentToUpdate = await _context.Departments
+                .Include(i => i.Administrator)
+                .FirstOrDefaultAsync(m => m.DepartmentID == id);
+
+            if (departmentToUpdate == null)
+            {
+                return HandleDeletedDepartment();
+            }
+
+            _context.Entry(departmentToUpdate)
+                .Property("RowVersion").OriginalValue = Department.RowVersion;
+
+            if (await TryUpdateModelAsync<Department>(
+                departmentToUpdate,
+                "Department",
+                s => s.Name, s => s.StartDate, s => s.Budget, s => s.InstructorID))
+            {
+                try
+                {
+                    await _context.SaveChangesAsync();
+                    return RedirectToPage("./Index");
+                }
+                catch (DbUpdateConcurrencyException ex)
+                {
+                    var exceptionEntry = ex.Entries.Single();
+                    var clientValues = (Department)exceptionEntry.Entity;
+                    var databaseEntry = exceptionEntry.GetDatabaseValues();
+                    if (databaseEntry == null)
+                    {
+                        ModelState.AddModelError(string.Empty, "Unable to save. " +
+                            "The department was deleted by another user.");
+                        return Page();
+                    }
+
+                    var dbValues = (Department)databaseEntry.ToObject();
+                    await setDbErrorMessage(dbValues, clientValues, _context);
+
+                    // Save the current RowVersion so next postback
+                    // matches unless an new concurrency issue happens.
+                    Department.RowVersion = (byte[])dbValues.RowVersion;
+                    // Clear the model error for the next postback.
+                    ModelState.Remove("Department.RowVersion");
+                }
+            }
+
+            InstructorNameSL = new SelectList(_context.Instructors,
+                "ID", "FullName", departmentToUpdate.InstructorID);
+
+            return Page();
+        }
+
+        private async Task setDbErrorMessage(Department dbValues,
+                Department clientValues, SchoolContext context)
+        {
+
+            if (dbValues.Name != clientValues.Name)
+            {
+                ModelState.AddModelError("Department.Name",
+                    $"Current value: {dbValues.Name}");
+            }
+            if (dbValues.Budget != clientValues.Budget)
+            {
+                ModelState.AddModelError("Department.Budget",
+                    $"Current value: {dbValues.Budget:c}");
+            }
+            if (dbValues.StartDate != clientValues.StartDate)
+            {
+                ModelState.AddModelError("Department.StartDate",
+                    $"Current value: {dbValues.StartDate:d}");
+            }
+            if (dbValues.InstructorID != clientValues.InstructorID)
+            {
+                Instructor dbInstructor = await _context.Instructors
+                   .FindAsync(dbValues.InstructorID);
+                ModelState.AddModelError("Department.InstructorID",
+                    $"Current value: {dbInstructor?.FullName}");
+            }
+
+            ModelState.AddModelError(string.Empty,
+                "The record you attempted to edit "
+              + "was modified by another user after you. The "
+              + "edit operation was canceled and the current values in the database "
+              + "have been displayed. If you still want to edit this record, click "
+              + "the Save button again.");
+        }
